@@ -29,7 +29,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 # - qdrant_collection_name: nama koleksi tempat vector akan disimpan
 csv_path = 'data/imdb_top_1000_cleaned.csv'
 db_path = 'sqlite:///movies.db' # Ini akan membuat file 'movies.db'
-qdrant_collection_name = 'imdb_movies'
+qdrant_collection_name = 'fadhlanrio'
 
 # BAGIAN 3: LOAD DATA CSV
 # Tujuan
