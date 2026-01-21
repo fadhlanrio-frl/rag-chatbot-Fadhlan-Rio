@@ -4,8 +4,6 @@
 # File environment
 .env
 
-# File database 
-*.db
 
 # Cache Python
 __pycache__/

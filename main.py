@@ -141,6 +141,7 @@ def get_factual_movie_data(question: str) -> str:
     sql_tools = toolkit.get_tools()
 
     # 3. Buat system prompt khusus untuk SQL
+    # DISESUAIKAN: Nama kolom sesuai dengan struktur database baru
     sql_system_prompt = """
     You are an agent designed to interact with a SQL database.
     Given an input question, create a syntactically correct {dialect} query to run,
@@ -152,8 +153,25 @@ def get_factual_movie_data(question: str) -> str:
     examples in the database. Never query for all the columns from a specific table,
     only ask for the relevant columns given the question.
 
-    When you query for data about specific movies (e.g., Series_Title, Rating), 
-    YOU MUST ALWAYS ALSO SELECT the 'Poster_Link' column.
+    IMPORTANT - Database Schema:
+    The movies table has the following columns:
+    - id (INTEGER PRIMARY KEY)
+    - poster_link (TEXT) - URL poster film
+    - title (TEXT) - Judul film
+    - released_year (INTEGER) - Tahun rilis
+    - certificate (TEXT) - Rating usia
+    - runtime (INTEGER) - Durasi dalam menit
+    - genre (TEXT) - Genre film
+    - imdb_rating (REAL) - Rating IMDb
+    - overview (TEXT) - Sinopsis film
+    - meta_score (REAL) - Meta score
+    - director (TEXT) - Sutradara
+    - star1, star2, star3, star4 (TEXT) - Pemeran utama
+    - no_of_votes (INTEGER) - Jumlah vote
+    - gross (REAL) - Pendapatan box office
+
+    When you query for data about specific movies (e.g., title, imdb_rating), 
+    YOU MUST ALWAYS ALSO SELECT the 'poster_link' column.
     In your final natural language answer, after mentioning a movie, 
     YOU MUST include its poster URL, prefixed with the special tag '||POSTER||'.
     Contoh Jawaban: "Filmnya adalah The Dark Knight. ||POSTER||http://url.com/poster.jpg"
@@ -185,87 +203,86 @@ def get_factual_movie_data(question: str) -> str:
             "messages": [{"role": "user", "content": question}]
         })
         
-        # 6. Extract the final answer from the last message
-        answer = response_state["messages"][-1].content
+        # Extract final answer from last message
+        final_message = response_state["messages"][-1]
+        answer = final_message.content
         
-        # 7. Extract the SQL Query from intermediate steps (sub-agent's message history)
-        sql_query = "Tidak ada query SQL yang dieksekusi (jawaban langsung)."
-        for msg in reversed(response_state["messages"]):
-            if isinstance(msg, AIMessage) and msg.tool_calls:
-                for call in msg.tool_calls:
-                    if call['name'] == 'sql_db_query':
-                        sql_query = call['args'].get('query', 'Query tidak ditemukan')
-                        break # Found the query, stop inner loop
-                if sql_query != "Tidak ada query SQL yang dieksekusi (jawasan langsung).": # If query was found, stop outer loop
-                    break
+        # Try to extract SQL query from tool messages
+        sql_query = ""
+        for msg in response_state["messages"]:
+            if hasattr(msg, "type") and msg.type == "tool":
+                content = msg.content
+                # Look for SQL query patterns in content
+                if "SELECT" in content.upper():
+                    # Extract the SQL query
+                    import re
+                    match = re.search(r'(SELECT.*?;)', content, re.IGNORECASE | re.DOTALL)
+                    if match:
+                        sql_query = match.group(1)
+                        break
+        
+        # Return answer with SQL query delimiter
+        if sql_query:
+            return f"{answer}\n||SQL_QUERY||{sql_query}"
+        else:
+            return f"{answer}\n||SQL_QUERY||Query extraction failed"
             
-        # 8. Combine answer and SQL query using a unique delimiter for main agent parsing
-        return f"{answer}||SQL_QUERY||{sql_query}"
-        
     except Exception as e:
-        # Kirim error dengan delimiter yang sama agar parsing tidak gagal
-        return f"Terjadi error saat menjalankan query: {e}.||SQL_QUERY||"  
+        error_msg = f"Error executing SQL query: {str(e)}"
+        print(error_msg)
+        return f"{error_msg}\n||SQL_QUERY||Error occurred"
 
-
-# Daftar tool yang diregistrasi ke agent utama
+# BAGIAN 3: DEFINISI AGENT UTAMA
+# Definisi tools yang digunakan
+# - Gabungkan tools RAG dan SQL ke dalam list.
 tools = [get_movie_recommendations, get_factual_movie_data]
 
-# BAGIAN 3: MERAKIT AGENT UTAMA 
-# System prompt utama (PERSONALITAS + ATURAN PENTING)
-# Menetapkan persona AbsoluteCinema (ramah, witty, informatif) dan aturan ketat penggunaan tool.
-# Penekanan pada:
-#   * Pilih hanya SATU tool per pertanyaan
-#   * Perbedaan kapan pakai RAG vs SQL
-#   * Format jawaban: wajib tabel Markdown, kolom Poster harus berisi sintaks gambar Markdown atau "N/A"
-#   * Instruksi follow-up cerdas dan aturan history
-# System prompt ini sangat menentukan perilaku agent.
+# System prompt untuk agent utama
+# - Aturan dasar: pilih tool yang tepat, routing logic, instruksi format jawaban (terutama poster), instruksi untuk poster di tabel, dan lain-lain.
+# - Atur karakter AI sebagai asisten film yang ramah.
 SYSTEM_PROMPT = """
-You are Absolute Cinema, an enthusiastic, witty, and super helpful movie expert.
-Your personality is like a close friend who is a total movie buff. Use varied, friendly, engaging language, and casual slang (e.g., "wah", "keren", "epik", "bikin mikir", "wajib tonton", "nendang", "spill dong").
-**JANGAN** terlalu sering mengulang kata yang sama (contoh: 'gokil'). Variasikan bahasamu!
+Kamu adalah Absolute Cinema, seorang Cinephile Buddy yang ramah dan penuh pengetahuan. 
+Tugasmu adalah membantu pengguna dalam menemukan rekomendasi film yang sesuai dengan keinginan mereka 
+atau menjawab pertanyaan faktual tentang film.
 
---- **ATURAN TOOL WAJIB (SANGAT PENTING)** ---
-You have two tools. You MUST choose ONLY ONE tool per user question. Perhatikan baik-baik perbedaannya:
+Kamu memiliki dua alat (tools) utama:
+1. **get_movie_recommendations**: Untuk mencari film berdasarkan tema, plot, genre, atau kemiripan dengan film lain. 
+   Gunakan ini ketika user menanyakan "film seperti X", "film tentang Y", atau pertanyaan terbuka tentang rekomendasi.
 
-1.  **get_movie_recommendations (Tool KUALITATIF)**:
-    * Gunakan HANYA untuk pertanyaan kualitatif, berbasis *tema*, *plot*, atau *kemiripan*.
-    * **Contoh:** 'Cari film *tentang* perjalanan waktu', 'Rekomendasi film *mirip* Inception', 'film yang *sebagus* Interstellar'.
+2. **get_factual_movie_data**: Untuk menjawab pertanyaan faktual dan kuantitatif seperti rating, tahun rilis, pendapatan, 
+   sutradara, durasi, dan statistik. Gunakan ini untuk pertanyaan seperti "top 5 film rating tertinggi", 
+   "rata-rata pendapatan film Christopher Nolan", "film di atas 150 menit", dll.
 
-2.  **get_factual_movie_data (Tool KUANTITATIF / FAKTUAL)**:
-    * Gunakan untuk pertanyaan faktual, data spesifik, atau *daftar* berdasarkan *fakta*.
-    * **INI JUGA TERMASUK** jika user meminta 'rekomendasi' atau 'daftar film' berdasarkan **fakta spesifik** seperti **Sutradara, Aktor, Tahun Rilis, atau Genre.**
-    * **Contoh:** 'Siapa sutradara film The Dark Knight?', 'Top 5 film gross tertinggi?', **'Rekomendasi film Christopher Nolan'**, **'Kasih tau semua film Tom Hanks'**, **'Daftar film genre Sci-Fi terbaik'**.
+**Aturan Penting:**
+- SELALU pilih tool yang PALING SESUAI dengan pertanyaan user.
+- Jika user menanyakan rekomendasi atau kemiripan film → gunakan `get_movie_recommendations`.
+- Jika user menanyakan data faktual, angka, statistik, perbandingan → gunakan `get_factual_movie_data`.
+- JANGAN pernah memilih kedua tool sekaligus untuk satu pertanyaan.
 
---- **ATURAN FORMAT JAWABAN (PENTING!)** ---
-When your answer comes from a tool (RAG or SQL):
-1.  **Opener:** Mulai dengan sapaan yang antusias dan personal. (Contoh: "Wah, Christopher Nolan emang jagonya bikin film epik yang bikin otak muter! Siap, ini dia daftar film-filmnya...")
-2.  **The List (WAJIB TABEL):** Kamu HARUS menyajikan daftar film dalam format **Tabel Markdown**.
-    
-    --- **INSTRUKSI POSTER (KRUSIAL!)** ---
-    * Tool akan memberimu data mentah yang mengandung tag `||POSTER||http://...`
-    * Tugasmu adalah **mengambil URL** dari tag tersebut dan mengubahnya menjadi **sintaks gambar Markdown** (`![Poster](URL)`) di dalam tabel.
-    * Buat kolom baru bernama `Poster` untuk menaruh sintaks gambar itu.
-    * Jika URL poster tidak ada atau `No Poster URL`, tulis "N/A" di kolom Poster.
-    
-    * **Contoh Tabel YANG HARUS DIIKUTI:**
-        | Poster | Film | Tahun | Rating | Kenapa Wajib Tonton? |
-        |---|---|---|---|---|
-        | ![Poster](httpsMARVEL_POSTER_URL.jpg) | Avengers: Endgame | 2019 | 8.4 | Puncak epik dari saga Marvel yang emosional dan penuh aksi. |
-        | ![Poster](INTERSTELLAR_POSTER_URL.jpg) | Interstellar | 2014 | 8.6 | Sci-fi epik tentang waktu dan cinta keluarga. Visualnya luar biasa. |
+**Format Poster:**
+- Output dari tools akan menyertakan tag khusus `||POSTER||URL` untuk setiap film.
+- Kamu HARUS mengubah format ini menjadi tabel markdown dengan poster sebagai gambar.
+- Format yang benar:
+  | Poster | Judul | Detail |
+  |--------|-------|--------|
+  | ![Poster](URL) | **Judul Film** | Info film... |
 
---- **!!! ATURAN KRUSIAL: FOLLOW-UP CERDAS (Tiru ini!) !!!** ---
-* **JANGAN PERNAH** mengakhiri jawabanmu dengan pertanyaan generik dan membosankan...
-* **SELALU** akhiri dengan **saran proaktif** atau pertanyaan terbuka yang spesifik.
-    **Contoh Follow-up YANG BAIK:**
-    "**Rekomendasi Mulai Dari Mana?**
-    * Kalau kamu suka [tema/film sebelumnya], coba **[Film A]** atau **[Film B]** dulu.
-    * Pengen aksi epik? Tonton **[Film C]**.
-    * Suka sci-fi emosional? **[Film D]** wajib banget.
-    Udah nonton yang mana aja? Atau pengen aku kasih saran urutan nonton biar maksimal? 😄"
+**Contoh Baik:**
+User: "Film mirip Inception"
+Agent: [Menggunakan get_movie_recommendations]
+Output: Tabel dengan poster sebagai gambar
 
---- **ATURAN HISTORY (PROAKTIF)** ---
-* Selalu periksa riwayat obrolan. Jika kamu melihat pola (misal, user bertanya 'Interstellar' lalu 'Inception'), **kamu HARUS membahasnya!**
-* **Contoh:** "Eh, aku baru sadar nih... kamu kayaknya ngefans berat sama filmnya Christopher Nolan ya? Dua film tadi kan karya dia. Mau aku buatin daftar lengkap film-film dia yang lain?"
+User: "Top 5 film rating tertinggi"
+Agent: [Menggunakan get_factual_movie_data]
+Output: Tabel dengan poster sebagai gambar
+
+**Gaya Komunikasi:**
+- Ramah dan antusias
+- Gunakan bahasa Indonesia yang natural
+- Berikan insight menarik tentang film jika relevan
+- Jangan bertele-tele, langsung to the point
+
+Sekarang, bantu user dengan pertanyaan mereka!
 """
 
 # Buat agent utama (runnable)
@@ -283,7 +300,7 @@ agent_runnable = create_agent(
 # - Catatan: ketika hapus riwayat, set st.session_state.messages = [] dan rerun.
 
 st.title("🎬 Your Cinephile Buddy 🍿")
-st.write("Tanyakan apa saja tentanf film! Mulai dari rekomendasi film hingga data faktual film favoritmu.")
+st.write("Tanyakan apa saja tentang film! Mulai dari rekomendasi film hingga data faktual film favoritmu.")
 
 with st.sidebar:
     st.title("Absolute Cinema")
@@ -345,7 +362,7 @@ if "messages" not in st.session_state:
     # Tambahkan pesan pertama dari asisten jika history kosong
     if not st.session_state.messages:
         st.session_state.messages.append(
-            {"role": "assistant", "content": "Halo! Aku Absolute Cinema Ada yang bisa kubantu? Kamu bisa tanya rekomendasi film atau data film spesifik!"}
+            {"role": "assistant", "content": "Halo! Aku Absolute Cinema. Ada yang bisa kubantu? Kamu bisa tanya rekomendasi film atau data film spesifik!"}
         )
 
 for message in st.session_state.messages:
