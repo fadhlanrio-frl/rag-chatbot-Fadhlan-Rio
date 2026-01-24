@@ -377,7 +377,7 @@ cols = st.columns([1, 1, 1.2]) # Buat kolom dengan lebar berbeda
 with cols[0]:
     st.button("Film yang mirip Interstellar", on_click=set_user_input, args=("Rekomendasi film yang mirip Interstellar",), use_container_width=True)
 with cols[1]:
-    st.button("Rekomendasi Film Horor", on_click=set_user_input, args=("Apa film horor dengan rating terbaik?",), use_container_width=True)
+    st.button("Rekomendasi Film Horor", on_click=set_user_input, args=("Apa film horor dengan rating terbaik? Tampilkan juga ratingnya!",), use_container_width=True)
 with cols[2]:
     st.button("Rekomendasi film Avengers", on_click=set_user_input, args=("Kasih tau daftar film Avengert terlaris",), use_container_width=True)
 
