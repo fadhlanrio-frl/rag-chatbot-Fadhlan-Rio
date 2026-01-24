@@ -379,7 +379,7 @@ with cols[0]:
 with cols[1]:
     st.button("Rekomendasi Film Horor", on_click=set_user_input, args=("Apa film horor dengan rating terbaik? Tampilkan juga ratingnya!",), use_container_width=True)
 with cols[2]:
-    st.button("Rekomendasi film Avengers", on_click=set_user_input, args=("Kasih tau daftar film Avengert terlaris",), use_container_width=True)
+    st.button("Rekomendasi film Avengers", on_click=set_user_input, args=("Kasih tau daftar film Avengers terlaris",), use_container_width=True)
 
 # Session management & chat history
 # - Inisialisasi session_id unik (untuk Langfuse dan tracking sesi).
