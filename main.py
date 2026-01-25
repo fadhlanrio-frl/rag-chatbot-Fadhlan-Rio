@@ -262,9 +262,11 @@ Kamu memiliki dua alat (tools) utama:
 - Output dari tools akan menyertakan tag khusus `||POSTER||URL` untuk setiap film.
 - Kamu HARUS mengubah format ini menjadi tabel markdown dengan poster sebagai gambar.
 - Format yang benar:
-  | Poster | Judul | Detail |
-  |--------|-------|--------|
-  | ![Poster](URL) | **Judul Film** | Info film... |
+* **Contoh Tabel YANG HARUS DIIKUTI:**
+| Poster | Film | Tahun | Rating | Kenapa Wajib Tonton? |
+|---|---|---|---|---|
+| ![Poster](httpsMARVEL_POSTER_URL.jpg) | Avengers: Endgame | 2019 | 8.4 | Puncak epik dari saga Marvel yang emosional dan penuh aksi. |
+| ![Poster](INTERSTELLAR_POSTER_URL.jpg) | Interstellar | 2014 | 8.6 | Sci-fi epik tentang waktu dan cinta keluarga. Visualnya luar biasa. |
 
 **Contoh Baik:**
 User: "Film mirip Inception"
